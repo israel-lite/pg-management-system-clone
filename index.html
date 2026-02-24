@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<title>HMS · Dashboard</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap"
+    rel="stylesheet"/>
+<link rel="stylesheet" href="src/output.css" />
+
+
+  <!-- [8] Small custom CSS block for things Tailwind can't do alone:
+           - SVG donut ring animations
+           - conic-gradient rings for the circular progress charts
+           We keep this minimal; everything else uses Tailwind utility classes -->
+  <style>
+    /* ── Ring base ────────────────────────────────────────── */
+    /* [9] .ring-track: the grey background circle of every donut chart.
+           stroke-dasharray="283" is the full circumference of a r=45 circle → 2πr ≈ 283.
+           We set it once here so all rings share the same base. */
+    .ring-track {
+      stroke: #2a2a2a;
+      stroke-width: 10;
+      fill: none;
+    }
+
+    /* [10] .ring-fill: the coloured arc layered on top of the track.
+            stroke-dasharray controls how much of the 283-unit circle is filled vs gaps.
+            stroke-linecap: round gives the rounded ends visible in the Figma design. */
+    .ring-fill {
+      stroke-width: 10;
+      fill: none;
+      stroke-linecap: round;
+      /* [11] Rotate the arc so it starts at the top (12 o'clock) instead of 3 o'clock.
+              transform-origin must be the center of the 100×100 viewBox → (50, 50) */
+      transform: rotate(-90deg);
+      transform-origin: 50px 50px;
+      /* [12] Smooth grow-in animation when the page loads */
+      animation: ring-in 1s ease-out forwards;
+    }
+
+    /* [13] Keyframe: arc grows from 0 to its final length over 1 second */
+    @keyframes ring-in {
+      from { stroke-dashoffset: 283; }
+      to   { stroke-dashoffset: 0;   }
+    }
+
+    /* ── Per-ring colours & fill amounts ─────────────────── */
+    /* [14] Each .ring-* class overrides stroke-dasharray with:
+            (percentage / 100) × 283 = the coloured arc length.
+            The remaining length is transparent (gap). */
+    .ring-cyan   { stroke: #00e5ff; stroke-dasharray: 141.5 283; } /* 50% → 141.5 */
+    .ring-yellow { stroke: #facc15; stroke-dasharray: 212.25 283; } /* 75% → 212.25 */
+    .ring-pink   { stroke: #f0047f; stroke-dasharray: 268.85 283; } /* 95% → 268.85 */
+
+    /* [15] Fees ring: 50% cyan + a short pink arc overlapping it
+            We use two separate <circle> elements stacked; this class handles the pink accent */
+    .ring-fees-cyan  { stroke: #00e5ff; stroke-dasharray: 90 283; }
+    .ring-fees-pink  { stroke: #f0047f; stroke-dasharray: 40 283; stroke-dashoffset: -90; }
+
+    /* [16] Emergency button pulse — a red glow that slowly expands then fades,
+            mimicking a real alert button to draw attention */
+    @keyframes pulse-glow {
+      0%   { box-shadow: 0 0 0   0 rgba(239,68,68,0.7); }
+      70%  { box-shadow: 0 0 0 12px rgba(239,68,68,0);   }
+      100% { box-shadow: 0 0 0   0 rgba(239,68,68,0);    }
+    }
+    .btn-emergency { animation: pulse-glow 2s infinite; }
+
+    /* [17] Custom thin scrollbar so the student list panel scrolls without ugly default bars */
+    .slim-scroll::-webkit-scrollbar       { width: 4px; }
+    .slim-scroll::-webkit-scrollbar-track { background: transparent; }
+    .slim-scroll::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 9999px; }
+  </style>
+</head>
+
+<body class="bg-[#0e0e0e] text-[#e5e7eb] font-sans h-screen flex overflow-hidden">
+  <!--
+    [18] body classes broken down:
+         bg-[#0e0e0e]  → near-black background (arbitrary Tailwind value with square brackets)
+         text-[#e5e7eb] → light grey default text colour
+         font-sans      → applies the DM Sans font stack we extended in tailwind.config.js
+         h-screen       → height = 100vh (full viewport height)
+         flex           → turns body into a flex container so the sidebar + main sit side-by-side
+         overflow-hidden → prevents any accidental outer scrollbar
+  -->
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       LEFT SIDEBAR
+  ════════════════════════════════════════════════════════════════ -->
+  <aside class="w-44 min-h-screen bg-[#141414] flex flex-col py-6 px-3 shrink-0">
+    <!--
+      [19] aside (semantic HTML for sidebars):
+           w-44            → width: 11rem (176px) — fixed sidebar width
+           min-h-screen    → at least full viewport height, grows if content is taller
+           bg-[#141414]    → slightly lighter than body so the sidebar "lifts" visually
+           flex flex-col   → stack children vertically
+           py-6 px-3       → padding: 1.5rem top/bottom, 0.75rem left/right
+           shrink-0        → prevent sidebar from shrinking when window is narrow
+    -->
+
+    <!-- Logo -->
+    <div class="flex items-center gap-2 px-2 mb-8">
+      <!-- [20] flex items-center gap-2: horizontal row, vertically centred, 8px gap between logo dot and text -->
+      <span class="w-3 h-3 rounded-full bg-[#00e5ff] inline-block"></span>
+      <!-- [21] Cyan circle acts as the HMS brand dot: w-3 h-3 = 12px square, rounded-full = perfect circle -->
+      <span class="text-base font-bold tracking-widest text-white">HMS</span>
+      <!-- [22] text-base = 16px, font-bold = 700 weight, tracking-widest = very spread letter-spacing, text-white = pure #fff -->
+    </div>
+
+    <!-- Nav items -->
+    <nav class="flex flex-col gap-1">
+      <!-- [23] flex flex-col gap-1: vertical stack with 4px gap between each nav link -->
+
+      <!-- Active item -->
+      <a href="#"
+         class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-[#00e5ff]/10 text-[#00e5ff] text-sm font-medium">
+        <!--
+          [24] Active nav link classes:
+               flex items-center gap-3 → icon + label side-by-side, centred, 12px gap
+               px-3 py-2.5            → horizontal 12px, vertical 10px padding
+               rounded-lg             → 8px border radius
+               bg-[#00e5ff]/10        → cyan at 10% opacity = subtle tinted highlight
+               text-[#00e5ff]         → cyan text to match the highlight
+               text-sm                → 14px font size
+               font-medium            → 500 weight
+        -->
+        <!-- SVG icon: bar chart (Analytics) -->
+        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <!-- [25] w-4 h-4 = 16px icon; shrink-0 prevents it from squishing; stroke="currentColor" inherits the text colour -->
+          <path stroke-linecap="round" stroke-linejoin="round"
+                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        </svg>
+        Analytics
+      </a>
+
+      <!-- Inactive items — same structure, different colour -->
+      <a href="#"
+         class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#9ca3af] text-sm font-medium hover:bg-white/5 hover:text-white transition-colors">
+        <!--
+          [26] Inactive nav link extras vs active:
+               text-[#9ca3af]  → muted grey instead of cyan
+               hover:bg-white/5 → white at 5% opacity on hover = very subtle highlight
+               hover:text-white → brighten text on hover
+               transition-colors → animate the colour change (150ms ease by default)
+        -->
+        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round"
+                d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+        </svg>
+        Students
+      </a>
+
+      <a href="#"
+         class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#9ca3af] text-sm font-medium hover:bg-white/5 hover:text-white transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round"
+                d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+        </svg>
+        Complaints
+      </a>
+
+      <a href="#"
+         class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#9ca3af] text-sm font-medium hover:bg-white/5 hover:text-white transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round"
+                d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+        </svg>
+        Stock
+      </a>
+
+      <a href="#"
+         class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#9ca3af] text-sm font-medium hover:bg-white/5 hover:text-white transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round"
+                d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+        </svg>
+        Users
+      </a>
+
+      <a href="#"
+         class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-[#9ca3af] text-sm font-medium hover:bg-white/5 hover:text-white transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round"
+                d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+        </svg>
+        Meals
+      </a>
+    </nav>
+  </aside>
+  <!-- END SIDEBAR -->
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       MAIN COLUMN  (top nav + scrollable content)
+  ════════════════════════════════════════════════════════════════ -->
+  <div class="flex flex-col flex-1 min-w-0">
+    <!--
+      [27] Wrapper for top-nav + page content:
+           flex flex-col → stack nav (horizontal) ABOVE content (vertical direction)
+           flex-1        → take up ALL remaining horizontal space after the sidebar
+           min-w-0       → critical Flexbox fix! Without this, a flex child won't shrink
+                           below its content size, causing overflow bugs
+    -->
+
+    <!-- TOP NAVIGATION BAR -->
+    <header class="flex items-center gap-1 px-6 py-0 bg-[#141414] border-b border-[#2a2a2a] shrink-0">
+      <!--
+        [28] header:
+             flex items-center → horizontal row, vertically centred
+             gap-1             → 4px between each tab
+             px-6              → 24px side padding to align with content below
+             bg-[#141414]      → matches sidebar background = same "chrome" layer
+             border-b border-[#2a2a2a] → 1px bottom border in dark grey = subtle divider
+             shrink-0          → don't let the header compress when content is tall
+      -->
+
+      <!-- Active tab -->
+      <a href="#"
+         class="px-4 py-3.5 text-sm font-medium text-[#00e5ff] border-b-2 border-[#00e5ff] -mb-px">
+        <!--
+          [29] Active tab trick:
+               border-b-2 border-[#00e5ff] → cyan underline
+               -mb-px  → negative 1px bottom margin pulls the border flush with the header's
+                          own bottom border, creating the "tab selected" overlap effect
+        -->
+        Dashboard
+      </a>
+
+      <a href="#" class="px-4 py-3.5 text-sm font-medium text-[#9ca3af] hover:text-white transition-colors">Rooms</a>
+      <a href="#" class="px-4 py-3.5 text-sm font-medium text-[#9ca3af] hover:text-white transition-colors">Attendance</a>
+      <a href="#" class="px-4 py-3.5 text-sm font-medium text-[#9ca3af] hover:text-white transition-colors">Accounts</a>
+      <a href="#" class="px-4 py-3.5 text-sm font-medium text-[#9ca3af] hover:text-white transition-colors">Maintenance</a>
+
+      <!-- Right: icons -->
+      <div class="ml-auto flex items-center gap-3">
+        <!-- [30] ml-auto: "margin-left: auto" in flex = pushes this group all the way to the right -->
+
+        <!-- Calendar icon -->
+        <button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 transition-colors text-[#9ca3af] hover:text-white">
+          <!-- [31] w-8 h-8 = 32px square; flex + items/justify-center = icon centred inside button -->
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        </button>
+
+        <!-- Bell icon -->
+        <button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 transition-colors text-[#9ca3af] hover:text-white relative">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+          </svg>
+          <!-- [32] Notification red dot -->
+          <span class="absolute top-1 right-1 w-2 h-2 rounded-full bg-[#f0047f]"></span>
+          <!-- [33] absolute → position relative to the button (which has relative class)
+                   top-1 right-1 → 4px from top and right
+                   w-2 h-2 = 8px dot; rounded-full = circle; bg-[#f0047f] = hot pink -->
+        </button>
+
+        <!-- User avatar -->
+        <div class="w-8 h-8 rounded-full bg-gradient-to-br from-[#00e5ff] to-[#f0047f] flex items-center justify-center text-xs font-bold text-white">
+          <!-- [34] Avatar circle:
+                   rounded-full = perfect circle
+                   bg-gradient-to-br from-cyan to-pink = diagonal gradient = unique, avoids flat color
+                   text-xs = 12px initials -->
+          IY
+        </div>
+      </div>
+    </header>
+    <!-- END TOP NAV -->
+
+    <!-- ─── SCROLLABLE PAGE CONTENT ────────────────────────────── -->
+    <div class="flex flex-1 overflow-hidden">
+      <!--
+        [35] This second flex container holds the main dashboard area + right panel side-by-side.
+             flex-1       → fill remaining height below the header
+             overflow-hidden → clips children so each panel can scroll independently
+      -->
+
+      <!-- Main scrollable area -->
+      <main class="flex-1 overflow-y-auto p-5 min-w-0 slim-scroll">
+        <!--
+          [36] main:
+               flex-1         → take all available width left of the right panel
+               overflow-y-auto → vertical scroll when content overflows
+               p-5            → 20px padding on all sides
+               slim-scroll    → applies our custom thin scrollbar from <style>
+        -->
+
+        <!-- Page heading -->
+        <h1 class="text-lg font-semibold text-white mb-5">Dashboard</h1>
+        <!-- [37] text-lg = 18px; font-semibold = 600; mb-5 = 20px margin bottom -->
+
+        <!-- ── OCCUPANCY SECTION ──────────────────────────────── -->
+        <section class="bg-[#1a1a1a] rounded-xl p-5 mb-5 border border-[#2a2a2a]">
+          <!--
+            [38] section card:
+                 bg-[#1a1a1a]     → slightly lighter than body = card elevation
+                 rounded-xl       → 12px corner radius = modern card feel
+                 p-5              → 20px internal padding
+                 mb-5             → 20px gap before next section
+                 border border-[#2a2a2a] → 1px subtle border for definition
+          -->
+
+          <!-- Section header -->
+          <div class="flex items-center justify-between mb-5">
+            <span class="text-sm font-semibold text-white tracking-wide">Occupancy</span>
+            <!-- [39] tracking-wide = slightly expanded letter-spacing for label text -->
+            <svg class="w-4 h-4 text-[#6b7280] cursor-pointer hover:text-white transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </div>
+
+          <!-- 3 Hostel donut rings in a responsive grid -->
+          <div class="grid grid-cols-3 gap-4">
+            <!--
+              [40] grid grid-cols-3 → 3 equal columns
+                   gap-4           → 16px gap between columns
+            -->
+
+            <!-- Hostel 1 — 50% cyan -->
+            <div class="bg-[#141414] rounded-xl p-5 flex flex-col items-center gap-3 border border-[#2a2a2a]">
+              <!--
+                [41] Inner card for each hostel:
+                     bg-[#141414]        → one shade darker than section bg = layered depth
+                     flex flex-col items-center → stack label, ring, % label vertically centred
+                     gap-3               → 12px between items
+              -->
+              <div class="flex items-center justify-between w-full">
+                <span class="text-xs font-medium text-[#9ca3af]">Hostel 1</span>
+                <!-- [42] text-xs = 12px; text-[#9ca3af] = muted grey label -->
+                <svg class="w-3.5 h-3.5 text-[#6b7280]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </div>
+
+              <!-- SVG Donut Chart -->
+              <div class="relative w-24 h-24">
+                <!--
+                  [43] relative → allows the percentage label (absolute child) to sit on top of the SVG
+                       w-24 h-24 = 96px square container for the SVG
+                -->
+                <svg viewBox="0 0 100 100" class="w-full h-full -rotate-0">
+                  <!-- [44] viewBox="0 0 100 100": internal coordinate system is 100×100 units
+                            w-full h-full: SVG fills the 96px container -->
+                  <circle cx="50" cy="50" r="45" class="ring-track" />
+                  <!-- [45] cx/cy = centre at (50,50); r=45 → circumference = 2π×45 ≈ 283px
+                            ring-track class = grey stroke, no fill -->
+                  <circle cx="50" cy="50" r="45" class="ring-fill ring-cyan" />
+                  <!-- [46] Same circle but ring-fill+ring-cyan = cyan arc covering 50% of 283 = 141.5px -->
+                </svg>
+                <span class="absolute inset-0 flex items-center justify-center text-xl font-bold text-white">
+                  <!-- [47] absolute inset-0 → stretched over entire parent (w-24 h-24)
+                            flex items/justify-center → centre the text inside that overlay -->
+                  50%
+                </span>
+              </div>
+            </div>
+            <!-- END Hostel 1 -->
+
+            <!-- Hostel 2 — 75% yellow -->
+            <div class="bg-[#141414] rounded-xl p-5 flex flex-col items-center gap-3 border border-[#2a2a2a]">
+              <div class="flex items-center justify-between w-full">
+                <span class="text-xs font-medium text-[#9ca3af]">Hostel 2</span>
+                <svg class="w-3.5 h-3.5 text-[#6b7280]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </div>
+              <div class="relative w-24 h-24">
+                <svg viewBox="0 0 100 100" class="w-full h-full">
+                  <circle cx="50" cy="50" r="45" class="ring-track" />
+                  <circle cx="50" cy="50" r="45" class="ring-fill ring-yellow" />
+                  <!-- [48] ring-yellow = stroke: #facc15; stroke-dasharray: 212.25 → 75% of 283 -->
+                </svg>
+                <span class="absolute inset-0 flex items-center justify-center text-xl font-bold text-white">75%</span>
+              </div>
+            </div>
+
+            <!-- Hostel 3 — 95% pink -->
+            <div class="bg-[#141414] rounded-xl p-5 flex flex-col items-center gap-3 border border-[#2a2a2a]">
+              <div class="flex items-center justify-between w-full">
+                <span class="text-xs font-medium text-[#9ca3af]">Hostel 3</span>
+                <svg class="w-3.5 h-3.5 text-[#6b7280]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </div>
+              <div class="relative w-24 h-24">
+                <svg viewBox="0 0 100 100" class="w-full h-full">
+                  <circle cx="50" cy="50" r="45" class="ring-track" />
+                  <circle cx="50" cy="50" r="45" class="ring-fill ring-pink" />
+                  <!-- [49] ring-pink = stroke: #f0047f; stroke-dasharray: 268.85 → 95% of 283 -->
+                </svg>
+                <span class="absolute inset-0 flex items-center justify-center text-xl font-bold text-white">95%</span>
+              </div>
+            </div>
+          </div>
+        </section>
+        <!-- END OCCUPANCY -->
+
+        <!-- ── FEES COLLECTION SECTION ───────────────────────── -->
+        <section class="bg-[#1a1a1a] rounded-xl p-5 mb-5 border border-[#2a2a2a]">
+          <div class="flex items-center justify-between mb-5">
+            <span class="text-sm font-semibold text-white tracking-wide">Fees Collection</span>
+            <svg class="w-4 h-4 text-[#6b7280]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </div>
+
+          <div class="flex items-center gap-6">
+            <!--
+              [50] flex items-center gap-6 → ring (left) + stats grid (right) in one row, centred vertically, 24px gap
+            -->
+
+            <!-- Dual-colour fees ring -->
+            <div class="relative w-28 h-28 shrink-0">
+              <!-- [51] shrink-0 → ring never shrinks when stats grid needs more space -->
+              <svg viewBox="0 0 100 100" class="w-full h-full">
+                <circle cx="50" cy="50" r="45" class="ring-track" />
+                <circle cx="50" cy="50" r="45" class="ring-fill ring-fees-cyan" />
+                <!-- [52] Cyan arc: 90/283 ≈ 32% of the ring (collected portion) -->
+                <circle cx="50" cy="50" r="45" class="ring-fill ring-fees-pink" />
+                <!-- [53] Pink arc: starts after cyan (offset -90) for another 40 units — overdue portion -->
+              </svg>
+              <span class="absolute inset-0 flex items-center justify-center text-lg font-bold text-white">50%</span>
+            </div>
+
+            <!-- Stats 2×2 grid -->
+            <div class="grid grid-cols-2 gap-3 flex-1">
+              <!--
+                [54] grid grid-cols-2: 2 columns side by side
+                     gap-3: 12px gutter between all cells
+                     flex-1: take remaining width after the ring
+              -->
+
+              <!-- Expected -->
+              <div class="bg-[#141414] rounded-lg p-3 border border-[#2a2a2a]">
+                <p class="text-[10px] text-[#6b7280] mb-1 uppercase tracking-wider">Expected</p>
+                <!-- [55] text-[10px]: 10px tiny label; uppercase + tracking-wider = styled sub-label -->
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-semibold text-white">₹ 52,00,000</span>
+                  <svg class="w-3.5 h-3.5 text-[#6b7280]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </div>
+              </div>
+
+              <!-- Remaining — highlighted in cyan -->
+              <div class="bg-[#141414] rounded-lg p-3 border border-[#2a2a2a]">
+                <p class="text-[10px] text-[#6b7280] mb-1 uppercase tracking-wider">Remaining</p>
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-semibold text-[#00e5ff]">₹ 15,60,000</span>
+                  <!-- [56] text-[#00e5ff] = cyan = visually draws attention to the "remaining" figure -->
+                  <svg class="w-3.5 h-3.5 text-[#6b7280]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </div>
+              </div>
+
+              <!-- Collected -->
+              <div class="bg-[#141414] rounded-lg p-3 border border-[#2a2a2a]">
+                <p class="text-[10px] text-[#6b7280] mb-1 uppercase tracking-wider">Collected</p>
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-semibold text-white">₹ 26,00,000</span>
+                  <svg class="w-3.5 h-3.5 text-[#6b7280]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </div>
+              </div>
+
+              <!-- Overdue — highlighted in pink -->
+              <div class="bg-[#141414] rounded-lg p-3 border border-[#2a2a2a]">
+                <p class="text-[10px] text-[#6b7280] mb-1 uppercase tracking-wider">Overdue</p>
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-semibold text-[#f0047f]">₹ 10,40,000</span>
+                  <!-- [57] text-[#f0047f] = hot pink = danger signal for overdue amounts -->
+                  <svg class="w-3.5 h-3.5 text-[#6b7280]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        <!-- END FEES COLLECTION -->
+
+        <!-- ── COMPLAINTS SECTION ─────────────────────────────── -->
+        <section class="bg-[#1a1a1a] rounded-xl p-5 border border-[#2a2a2a]">
+          <div class="flex items-center justify-between mb-5">
+            <span class="text-sm font-semibold text-white tracking-wide">Complaints</span>
+            <svg class="w-4 h-4 text-[#6b7280]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </div>
+
+          <div class="flex items-center gap-6">
+            <!-- Bar chart placeholder -->
+            <div class="flex-1 h-16 rounded-lg overflow-hidden flex">
+              <!--
+                [58] h-16 = 64px tall bar
+                     overflow-hidden → ensures rounded corners clip the coloured segments
+                     flex → segments sit side by side
+              -->
+              <div class="bg-[#00e5ff] h-full" style="width:40%"></div>
+              <!-- [59] Cyan = resolved portion — we use inline style for percentage widths
+                        because Tailwind's JIT can't generate arbitrary w-[40%] in all configurations
+                        without safelist entries; inline style is simpler here -->
+              <div class="bg-[#facc15] h-full" style="width:20%"></div>
+              <!-- Yellow = pending segment -->
+              <div class="bg-[#f0047f] h-full" style="width:40%"></div>
+              <!-- Pink = open/unresolved -->
+            </div>
+
+            <!-- Stats row -->
+            <div class="flex gap-5">
+              <div>
+                <p class="text-[10px] text-[#6b7280] uppercase tracking-wider mb-1 flex items-center gap-1">
+                  Total Complaints
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </p>
+                <span class="text-2xl font-bold text-white">158</span>
+                <!-- [60] text-2xl = 24px; font-bold 700 — the large number is the primary visual anchor -->
+              </div>
+              <div>
+                <p class="text-[10px] text-[#6b7280] uppercase tracking-wider mb-1 flex items-center gap-1">
+                  Resolved
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </p>
+                <span class="text-2xl font-bold text-[#22c55e]">96</span>
+                <!-- [61] text-[#22c55e] = green = positive/resolved visual feedback -->
+              </div>
+              <div>
+                <p class="text-[10px] text-[#6b7280] uppercase tracking-wider mb-1 flex items-center gap-1">
+                  Open
+                  <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                  </svg>
+                </p>
+                <span class="text-2xl font-bold text-[#f0047f]">62</span>
+                <!-- [62] Pink = open/pending = urgency colour -->
+              </div>
+            </div>
+          </div>
+        </section>
+        <!-- END COMPLAINTS -->
+      </main>
+      <!-- END MAIN SCROLLABLE CONTENT -->
+
+      <!-- ─── RIGHT PANEL ─────────────────────────────────────── -->
+      <aside class="w-56 shrink-0 flex flex-col overflow-hidden border-l border-[#2a2a2a]">
+        <!--
+          [63] Right panel aside:
+               w-56    → 224px fixed width
+               shrink-0 → never compress
+               flex flex-col → stack "Student Update" on top, "Emergency" on bottom
+               border-l → left border separating it from main content
+        -->
+
+        <!-- Student Update list — scrollable -->
+        <div class="flex-1 overflow-y-auto slim-scroll p-4">
+          <!-- [64] flex-1 → takes all space above the emergency block
+                   overflow-y-auto → scrollable when student list is long -->
+
+          <div class="flex items-center justify-between mb-4">
+            <span class="text-xs font-semibold text-white uppercase tracking-wider">Student Update</span>
+            <svg class="w-3.5 h-3.5 text-[#6b7280]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </div>
+
+          <!-- Repeating student rows -->
+          <!-- [65] We repeat the same row structure 6 times, mimicking the Figma design's list.
+                    In a real project this would be generated dynamically. -->
+          <div class="flex flex-col gap-2">
+
+            <!-- Student row template (×6) -->
+            <div class="flex items-center gap-2 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer">
+              <!--
+                [66] Row:
+                     flex items-center → avatar + info side-by-side, centred
+                     gap-2            → 8px gap
+                     p-2              → 8px padding inside row
+                     rounded-lg       → 8px corners for hover highlight
+                     hover:bg-white/5 → very subtle highlight on hover
+                     cursor-pointer   → signals interactivity
+              -->
+              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-[#facc15] to-[#f0047f] flex items-center justify-center text-[10px] font-bold text-white shrink-0">
+                RS
+                <!-- [67] Avatar initials: gradient circle same technique as header avatar, just different colours -->
+              </div>
+              <div class="min-w-0">
+                <!-- [68] min-w-0: allows the text to truncate (ellipsis) when too long — without this, flex children don't truncate -->
+                <p class="text-xs font-medium text-white truncate">Ramakant Sharma</p>
+                <!-- [69] truncate = overflow:hidden + text-overflow:ellipsis + white-space:nowrap in one utility -->
+                <p class="text-[10px] text-[#6b7280] flex items-center gap-1">
+                  <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+                  </svg>
+                  12:30
+                </p>
+              </div>
+            </div>
+
+            <!-- rows 2-6 (identical structure, simulating different students) -->
+            <div class="flex items-center gap-2 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer">
+              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-[#00e5ff] to-[#22c55e] flex items-center justify-center text-[10px] font-bold text-white shrink-0">RS</div>
+              <div class="min-w-0">
+                <p class="text-xs font-medium text-white truncate">Ramakant Sharma</p>
+                <p class="text-[10px] text-[#6b7280] flex items-center gap-1"><svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>12:30</p>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer">
+              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-[#f0047f] to-[#facc15] flex items-center justify-center text-[10px] font-bold text-white shrink-0">RS</div>
+              <div class="min-w-0">
+                <p class="text-xs font-medium text-white truncate">Ramakant Sharma</p>
+                <p class="text-[10px] text-[#6b7280] flex items-center gap-1"><svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>12:30</p>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer">
+              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-[#22c55e] to-[#00e5ff] flex items-center justify-center text-[10px] font-bold text-white shrink-0">RS</div>
+              <div class="min-w-0">
+                <p class="text-xs font-medium text-white truncate">Ramakant Sharma</p>
+                <p class="text-[10px] text-[#6b7280] flex items-center gap-1"><svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>12:30</p>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer">
+              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-[#facc15] to-[#00e5ff] flex items-center justify-center text-[10px] font-bold text-white shrink-0">RS</div>
+              <div class="min-w-0">
+                <p class="text-xs font-medium text-white truncate">Ramakant Sharma</p>
+                <p class="text-[10px] text-[#6b7280] flex items-center gap-1"><svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>12:30</p>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2 p-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer">
+              <div class="w-8 h-8 rounded-full bg-gradient-to-br from-[#f0047f] to-[#22c55e] flex items-center justify-center text-[10px] font-bold text-white shrink-0">RS</div>
+              <div class="min-w-0">
+                <p class="text-xs font-medium text-white truncate">Ramakant Sharma</p>
+                <p class="text-[10px] text-[#6b7280] flex items-center gap-1"><svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>12:30</p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Emergency Block -->
+        <div class="shrink-0 p-4 border-t border-[#2a2a2a] flex flex-col items-center gap-3">
+          <!--
+            [70] shrink-0 → always stays at the bottom regardless of list height
+                 border-t  → top border separating it from the student list
+                 flex flex-col items-center → centre the icon, text, and button
+          -->
+
+          <!-- Glowing red power icon -->
+          <div class="w-14 h-14 rounded-full bg-[#ef4444]/20 border border-[#ef4444]/40 flex items-center justify-center">
+            <!--
+              [71] Red translucent circle:
+                   bg-[#ef4444]/20  → red at 20% opacity = dark red glow
+                   border border-[#ef4444]/40 → red border at 40% opacity = ring effect
+            -->
+            <svg class="w-7 h-7 text-[#ef4444]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
+              <!-- [72] Power icon SVG: circle arc + vertical line = classic power symbol -->
+            </svg>
+          </div>
+
+          <p class="text-[10px] text-[#9ca3af] text-center leading-tight">
+            Press only in Case of<br />Emergency
+            <!-- [73] leading-tight = reduced line height for compact label text -->
+          </p>
+
+          <!-- Pulsing emergency button -->
+          <button class="btn-emergency w-full py-2 rounded-lg bg-[#ef4444] text-white text-xs font-bold uppercase tracking-widest hover:bg-[#dc2626] transition-colors">
+            <!--
+              [74] btn-emergency → adds the pulse-glow CSS animation from <style>
+                   w-full         → 100% of the panel width
+                   py-2           → 8px vertical padding
+                   bg-[#ef4444]   → solid red
+                   tracking-widest → very spread EMERGENCY text = high visibility
+                   hover:bg-[#dc2626] → slightly darker red on hover
+            -->
+            EMERGENCY
+          </button>
+        </div>
+      </aside>
+      <!-- END RIGHT PANEL -->
+
+    </div>
+    <!-- END CONTENT ROW -->
+  </div>
+  <!-- END MAIN COLUMN -->
+
+</body>
+</html>
